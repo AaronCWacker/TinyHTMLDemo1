@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Treasure Hunt</title>
+  <style>
+    body { text-align: center; background: #e0f7fa; font-family: Arial; }
+    canvas { border: 2px solid #0288d1; }
+    #leaderboard { background: #b3e5fc; padding: 10px; }
+  </style>
+</head>
+<body>
+  <h1>🏴‍☠️ Treasure Hunt</h1>
+  <input id="playerName" placeholder="Your Name">
+  <button onclick="startGame()">Start</button>
+  <canvas id="gameCanvas" width="400" height="400"></canvas>
+  <div id="leaderboard"><p id="logDisplay">Loading...</p></div>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let playerName = '', score = 0, treasures = [];
+    function generateTreasures() {
+      treasures = Array(5).fill().map(() => ({
+        x: Math.random() * 380 + 10,
+        y: Math.random() * 380 + 10,
+        found: false
+      }));
+    }
+    function draw() {
+      ctx.clearRect(0, 0, 400, 400);
+      treasures.forEach(t => {
+        if (!t.found) {
+          ctx.fillStyle = '#ffd700';
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, 10, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+      ctx.fillStyle = '#0288d1';
+      ctx.fillText(`Score: ${score}`, 10, 20);
+    }
+    function startGame() {
+      playerName = document.getElementById('playerName').value || 'Player';
+      score = 0;
+      generateTreasures();
+      draw();
+      updateLeaderboard();
+    }
+    canvas.addEventListener('click', (e) => {
+      if (!playerName) return;
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+      treasures.forEach(t => {
+        if (!t.found && Math.hypot(clickX - t.x, clickY - t.y) < 10) {
+          t.found = true;
+          score += 10;
+          logAction(playerName, score);
+        }
+      });
+      draw();
+    });
+    function logAction(name, points) {
+      const logEntry = { player: name, score: points, timestamp: '2025-07-06T09:59:00-05:00' };
+      let logs = JSON.parse(localStorage.getItem('gameLogs') || '[]');
+      logs.push(logEntry);
+      localStorage.setItem('gameLogs', JSON.stringify(logs));
+      updateLeaderboard();
+    }
+    function updateLeaderboard() {
+      let logs = JSON.parse(localStorage.getItem('gameLogs') || '[]');
+      document.getElementById('logDisplay').innerHTML = logs.slice(-5).map(log => 
+        `${log.player} scored ${log.score} at ${new Date(log.timestamp).toLocaleString()}`
+      ).join('<br>') || 'No history!';
+    }
+    generateTreasures();
+    draw();
+    updateLeaderboard();
+  </script>
+</body>
+</html>
