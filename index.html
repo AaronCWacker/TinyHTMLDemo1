@@ -394,7 +394,7 @@
         }
 
         // Particle system for explosions
-        function createExplosion(position) {
+        function createExplosion(position, isCollision = false) {
             const particleCount = 50;
             const geometry = new THREE.BufferGeometry();
             const positions = new Float32Array(particleCount * 3);
@@ -404,7 +404,7 @@
                 positions[i3] = position.x;
                 positions[i3 + 1] = position.y;
                 positions[i3 + 2] = position.z;
-                const color = Math.random() > 0.5 ? [1, 1, 0] : [1, 0, 0];
+                const color = isCollision ? [0.5, 0.5, 0.5] : (Math.random() > 0.5 ? [1, 1, 0] : [1, 0, 0]);
                 colors[i3] = color[0];
                 colors[i3 + 1] = color[1];
                 colors[i3 + 2] = color[2];
@@ -418,7 +418,7 @@
                 opacity: 0.8
             });
             const particles = new THREE.Points(geometry, material);
-            particles.userData = { lifetime: 60, velocities: [] };
+            particles.userData = { lifetime: isCollision ? 30 : 60, velocities: [] };
             for (let i = 0; i < particleCount; i++) {
                 particles.userData.velocities.push(
                     new THREE.Vector3(
@@ -429,6 +429,7 @@
                 );
             }
             scene.add(particles);
+            explosions.push(particles);
             return particles;
         }
 
@@ -450,7 +451,9 @@
                 currentHP: 10 * scaleMultiplier,
                 width: width,
                 depth: depth,
-                height: height
+                height: height,
+                isFalling: false,
+                fallVelocity: 0
             };
             return building;
         }
@@ -770,7 +773,7 @@
             document.getElementById('skill-turn-speed-meter').style.width = `${(skills.turnSpeed.level / skills.turnSpeed.maxLevel) * 100}%`;
         }
 
-        // Damage handling
+        // Damage handling for ships
         function applyDamage(ship, damage, hitPosition) {
             if (!ship.userData.active) return;
             const direction = hitPosition.clone().sub(ship.position).normalize();
@@ -802,7 +805,7 @@
             if (ship === playerShip) {
                 updateCharacterSheet();
             }
-            checkShipStatus(ship);
+            checkShipStatus(ship, hitPosition);
         }
 
         function checkShipStatus(ship, hitPosition) {
@@ -847,28 +850,91 @@
             building.userData.currentHP -= damage;
             createExplosion(hitPosition);
             if (building.userData.currentHP <= 0) {
-                currentTrackGroup.remove(building);
                 if (building.userData.splitCount < 3) {
                     const newScale = 0.5;
+                    const hitLocal = building.worldToLocal(hitPosition.clone());
+                    const width = building.userData.width * newScale;
+                    const depth = building.userData.depth * newScale;
+                    const height = building.userData.height * newScale;
+                    // Determine split direction based on hit position
+                    const absX = Math.abs(hitLocal.x);
+                    const absZ = Math.abs(hitLocal.z);
+                    const isXSplit = absX > absZ;
+                    const splitSize = (isXSplit ? building.userData.width : building.userData.depth) / 3;
+                    const remainingSize = splitSize * 2 * newScale;
                     const offsets = [
-                        new THREE.Vector3(5, 0, 5),
-                        new THREE.Vector3(-5, 0, -5)
+                        new THREE.Vector3(isXSplit ? splitSize : 0, 0, isXSplit ? 0 : splitSize).multiplyScalar(newScale),
+                        new THREE.Vector3(isXSplit ? -splitSize : 0, 0, isXSplit ? 0 : -splitSize).multiplyScalar(newScale)
                     ];
                     offsets.forEach(offset => {
                         const newBuilding = createBuilding(
                             building.position.x + offset.x,
                             building.position.z + offset.z,
-                            building.userData.width,
-                            building.userData.depth,
-                            building.userData.height,
+                            isXSplit ? remainingSize : width,
+                            isXSplit ? depth : remainingSize,
+                            height,
                             newScale,
                             building.userData.splitCount + 1
                         );
+                        newBuilding.userData.isFalling = true;
+                        newBuilding.userData.fallVelocity = 0;
                         currentTrackGroup.add(newBuilding);
                     });
+                    score += 100;
+                    document.getElementById('score').textContent = `Score: ${score}`;
                 }
-                score += 100;
-                document.getElementById('score').textContent = `Score: ${score}`;
+                currentTrackGroup.remove(building);
+            } else {
+                // Initiate falling if not already falling
+                if (!building.userData.isFalling) {
+                    building.userData.isFalling = true;
+                    building.userData.fallVelocity = 0;
+                }
+            }
+        }
+
+        // Update falling buildings
+        function updateFallingBuildings() {
+            if (!currentTrackGroup) return;
+            const buildings = currentTrackGroup.children.filter(c => c.isMesh && c.geometry.type === 'BoxGeometry');
+            for (let i = buildings.length - 1; i >= 0; i--) {
+                const building = buildings[i];
+                if (building.userData.isFalling) {
+                    building.userData.fallVelocity += 0.1; // Gravity
+                    building.position.y -= building.userData.fallVelocity / 60;
+                    if (building.position.y <= building.userData.height * 0.5) {
+                        building.position.y = building.userData.height * 0.5;
+                        building.userData.currentHP -= 2; // Additional damage on impact
+                        createExplosion(building.position);
+                        if (building.userData.currentHP <= 0) {
+                            if (building.userData.splitCount < 3) {
+                                const newScale = 0.5;
+                                const width = building.userData.width * newScale;
+                                const depth = building.userData.depth * newScale;
+                                const height = building.userData.height * newScale;
+                                const offsets = [
+                                    new THREE.Vector3(5 * newScale, 0, 5 * newScale),
+                                    new THREE.Vector3(-5 * newScale, 0, -5 * newScale)
+                                ];
+                                offsets.forEach(offset => {
+                                    const newBuilding = createBuilding(
+                                        building.position.x + offset.x,
+                                        building.position.z + offset.z,
+                                        width,
+                                        depth,
+                                        height,
+                                        newScale,
+                                        building.userData.splitCount + 1
+                                    );
+                                    currentTrackGroup.add(newBuilding);
+                                });
+                                score += 100;
+                                document.getElementById('score').textContent = `Score: ${score}`;
+                            }
+                            currentTrackGroup.remove(building);
+                        }
+                    }
+                }
             }
         }
 
@@ -986,6 +1052,7 @@
                         ship.position.add(direction.multiplyScalar(0.5));
                         ship.userData.speed *= 0.8;
                         applyDamage(ship, 2, ship.position);
+                        createExplosion(ship.position, true); // Collision particles
                     }
                 }
             });
@@ -1002,6 +1069,7 @@
                     if (distance < 5) {
                         const direction = shipPos.clone().sub(columnPos).normalize();
                         ship.position.add(direction.multiplyScalar(0.2));
+                        createExplosion(ship.position, true); // Collision particles
                     }
                 }
             });
@@ -1026,7 +1094,7 @@
                     positions[j3 + 2] += explosion.userData.velocities[j].z;
                 }
                 explosion.geometry.attributes.position.needsUpdate = true;
-                explosion.material.opacity = explosion.userData.lifetime / 60;
+                explosion.material.opacity = explosion.userData.lifetime / (explosion.userData.lifetime <= 30 ? 30 : 60);
             }
         }
 
@@ -1056,8 +1124,10 @@
             if (currentTrackGroup) scene.remove(currentTrackGroup);
             pickups.forEach(p => scene.remove(p));
             missiles.forEach(m => scene.remove(m));
+            explosions.forEach(e => scene.remove(e));
             pickups.length = 0;
             missiles.length = 0;
+            explosions.length = 0;
             const { trackGroup, waypoints: newWaypoints, startPosition } = generateTrack(trackConfigs[trackName]);
             currentTrackGroup = trackGroup;
             waypoints = newWaypoints;
@@ -1125,6 +1195,7 @@
                 updateAI();
                 updateMissiles();
                 updateExplosions();
+                updateFallingBuildings();
                 raceTime += 1 / 60;
                 document.getElementById('time').textContent = `Time: ${raceTime.toFixed(2)}`;
                 if (aiShips.every(s => !s.userData.active) && playerData.active) {
